@@ -42,6 +42,11 @@ num_times_retransmitted = [0] * node_count
 # Default: fixed random seed for reproducibility of results
 random.seed(args.random)
 
+def log(message):
+	""" Writes message to log.txt if log flag is enabled """
+	if log:
+		output.write(message)
+		
 def packet(env, arrive_time, node_number):
 	""" Simulate the arrival of packets at nodes """
 	yield env.timeout(arrive_time)
@@ -49,25 +54,25 @@ def packet(env, arrive_time, node_number):
 	# If node was previously empty, set a timeslot for next transmission
 	if (packets_in_node[node_number] == 1):
 		next_transmit_timeslot[node_number] = math.ceil(arrive_time)
-		if log: output.write("---Packet arrived at node %d. Will attempt transmit at t = %d, %d packet(s) in node---\n" % (node_number, next_transmit_timeslot[node_number], packets_in_node[node_number]))
+		log("---Packet arrived at node %d. Will attempt transmit at t = %d, %d packet(s) in node---\n" % (node_number, next_transmit_timeslot[node_number], packets_in_node[node_number]))
 	else:
-		if log: output.write("---Packet arrived at node %d. %d packet(s) in node.---\n" % (node_number, packets_in_node[node_number]))
+		log("---Packet arrived at node %d. %d packet(s) in node.---\n" % (node_number, packets_in_node[node_number]))
 	
 def timeslots(env):
 	""" Simulate the transmission of packets from nodes """
 	packets_transmitted = 0
 	while True:	
-		if log: output.write("Time slot %d:\n" % (env.now))
+		log("Time slot %d:\n" % (env.now))
 
 		# If only one node is attempting to transmit at current time, transmission is successful
 		if next_transmit_timeslot.count(env.now) == 1:
 			transmitting_node = next_transmit_timeslot.index(env.now)
 			packets_in_node[transmitting_node] -= 1
-			if log: output.write("---Node %d successfully transmits. %d packet(s) remaining---\n" % (transmitting_node, packets_in_node[transmitting_node]))
+			log("---Node %d successfully transmits. %d packet(s) remaining---\n" % (transmitting_node, packets_in_node[transmitting_node]))
 			if packets_in_node[transmitting_node] == 0:
 				next_transmit_timeslot[transmitting_node] = -1
 			else:
-				if log: output.write("-----Node %d still has packet(s), next transmit attempt at time %d-----\n" % (transmitting_node, env.now + 1))
+				log("-----Node %d still has packet(s), next transmit attempt at time %d-----\n" % (transmitting_node, env.now + 1))
 				next_transmit_timeslot[transmitting_node] = env.now + 1
 			num_times_retransmitted[transmitting_node] = 0 
 			packets_transmitted += 1
@@ -76,7 +81,7 @@ def timeslots(env):
 		elif next_transmit_timeslot.count(env.now) > 1:
 			for i in range(len(next_transmit_timeslot)):
 				if (next_transmit_timeslot[i] == env.now):
-					if log: output.write("---Node %d attempting transmit---\n" % i)
+					log("---Node %d attempting transmit---\n" % i)
 					num_times_retransmitted[i] += 1 
 					if backoff_algorithm == 'exponential':
 						k = min(num_times_retransmitted[i], 10)
@@ -84,12 +89,12 @@ def timeslots(env):
 					elif backoff_algorithm == 'linear':
 						k = min(num_times_retransmitted[i], 1024)
 						next_transmit_timeslot[i] = env.now + math.ceil(random.uniform(0, k))
-					if log: output.write("-----Node %d collided, rescheduled for t = %d-----\n" % (i, next_transmit_timeslot[i]))					
+					log("-----Node %d collided, rescheduled for t = %d-----\n" % (i, next_transmit_timeslot[i]))					
 		
 		# All packets transmitted; print results
 		if packets_transmitted == packet_count*node_count:
 			print "%d/%d(%2.5f) transmit timeslots successful." % (packets_transmitted, env.now+1, float(packets_transmitted)/(env.now+1))
-			if log: output.write("\n%d/%d(%2.5f) transmit timeslots successful." % (packets_transmitted, env.now+1, float(packets_transmitted)/(env.now+1)))
+			log("\n%d/%d(%2.5f) transmit timeslots successful." % (packets_transmitted, env.now+1, float(packets_transmitted)/(env.now+1)))
 			break			
 		yield env.timeout(1)
 	 
@@ -107,15 +112,15 @@ for node_num in range(node_count):
 env.run()
 
 """ RESULTS (nodes=10, packets=5000, seed=5):
-					Throughput
-					exponential			linear
+			Throughput
+			exponential			linear
 --------------------------------------------------
-	lambda=0.01		0.09770				0.09770				
-	lambda=0.02		0.19540				0.19540
-	lambda=0.03		0.29310				0.29310
-	lambda=0.04		0.39080				0.29819
-	lambda=0.05		0.48850				0.30181
-	lambda=0.06		0.58340				0.29873
+	lambda=0.01	0.09770				0.09770				
+	lambda=0.02	0.19540				0.19540
+	lambda=0.03	0.29310				0.29310
+	lambda=0.04	0.39080				0.29819
+	lambda=0.05	0.48850				0.30181
+	lambda=0.06	0.58340				0.29873
 	lambda=0.07 	0.67374				0.30396
 	lambda=0.08 	0.75322				0.29827
 	lambda=0.09 	0.79933				0.30114

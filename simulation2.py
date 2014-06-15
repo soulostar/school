@@ -1,55 +1,85 @@
 import math
 import random
 import simpy
-import sys
+import argparse
 
-if (len(sys.argv) != 3) or (sys.argv[2] != 'exponential' and sys.argv[2] != 'linear'):
-	print "Error with arguments. Format is \n$ python simulation2.py lambda algorithm\n, where lambda is the packet arrival rate(float) and algorithm is either 'exponential' or 'linear'"
-	exit(1) 
+# Parse arguments
+parser = argparse.ArgumentParser(description = "Simulate the throughput of Ethernet with different backoff algorithms.")
+parser.add_argument('rate', metavar='lambda', type=float, help="packet arrival rate")
+parser.add_argument('algorithm', metavar='algorithm', choices=['exponential', 'linear'], help="type of backoff algorithm to use ('exponential' or 'linear')")
+parser.add_argument('-l','--log', action='store_true', default=False, help="flag to write to a log file")
+parser.add_argument('-n', metavar='num_nodes', type=int, default=10, help='number of nodes')
+parser.add_argument('-p', metavar='packet_count', type=int, default=5000, help='total packets to be transmitted per node')
+parser.add_argument('-random', nargs='?', type=int, default=5, const=random.randrange(1,10000), help='random seed (fixed to 5 if -random is not present, set to a random integer from 1 to 10000 if -random is present but is not followed by an argument)')  
+args = parser.parse_args()
 
-timeslot_size = 1
-lambd = float(sys.argv[1])
-backoff_algorithm = sys.argv[2]
-packet_count = 5000
-packets_in_node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-next_transmit_timeslot = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-num_times_retransmitted = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-packets_remaining = packet_count * 10
-seed = 5 # fixed seed for reproducibility of results
+# Packet arrival rate
+lambd = args.rate
 
-random.seed(seed)
+# Backoff algorithm to use: "exponential" or "linear"
+backoff_algorithm = args.algorithm
+
+# Logging flag
+log = args.log
+if log:
+	output = open('log.txt', 'wb')
+
+# Number of nodes
+node_count = args.n
+
+# Number of packets for each node to transmit
+packet_count = args.p
+
+# The number of packets currently in each node
+packets_in_node = [0] * node_count
+
+# The next transmit timeslot for each node
+next_transmit_timeslot = [-1] * node_count
+
+# The number of times each node has consecutively attempted to retransmit its current packet
+num_times_retransmitted = [0] * node_count
+
+# Total number of packets remaining across all nodes
+packets_remaining = packet_count * node_count
+
+# Default: fixed random seed for reproducibility of results
+random.seed(args.random)
 
 def packet(env, arrive_time, node_number):
+	""" Simulate the arrival of packets at nodes """
 	yield env.timeout(arrive_time)
 	packets_in_node[node_number] += 1
+	# If node was previously empty, set a timeslot for next transmission
 	if (packets_in_node[node_number] == 1):
 		next_transmit_timeslot[node_number] = math.ceil(arrive_time)
-		#print "Packet arrived at node %d. Will attempt transmit at %d, %d packets left to transmit" % (node_number, next_transmit_timeslot[node_number], packets_remaining)
-	#else:
-		#print "Packet arrived at node %d. %d packets in node." % (node_number, packets_in_node[node_number])
+		if log: output.write("---Packet arrived at node %d. Will attempt transmit at t = %d, %d packet(s) in node---\n" % (node_number, next_transmit_timeslot[node_number], packets_in_node[node_number]))
+	else:
+		if log: output.write("---Packet arrived at node %d. %d packet(s) in node.---\n" % (node_number, packets_in_node[node_number]))
 	
 def timeslots(env):
+	""" Simulate the transmission of packets from nodes """
 	global packets_remaining
-	successful_transmits = 0
-	while True:		
-		#print "Time slot %d:\n" % (env.now/timeslot_size)
+	while True:	
+		if log: output.write("Time slot %d:\n" % (env.now))
+
+		# If only one node is attempting to transmit at current time, transmission is successful
 		if next_transmit_timeslot.count(env.now) == 1:
 			transmitting_node = next_transmit_timeslot.index(env.now)
-			#print "---A successful transmit by node %d occurs.---" % transmitting_node
 			packets_in_node[transmitting_node] -= 1
+			if log: output.write("---Node %d successfully transmits. %d packet(s) remaining---\n" % (transmitting_node, packets_in_node[transmitting_node]))
 			if packets_in_node[transmitting_node] == 0:
 				next_transmit_timeslot[transmitting_node] = -1
 			else:
-				#print "-----Node %d still has packet(s), next transmit attempt at time %d-----" % (transmitting_node, env.now + 1)
+				if log: output.write("-----Node %d still has packet(s), next transmit attempt at time %d-----\n" % (transmitting_node, env.now + 1))
 				next_transmit_timeslot[transmitting_node] = env.now + 1
 			num_times_retransmitted[transmitting_node] = 0 
 			packets_remaining -= 1
-			successful_transmits += 1
 
+		# Transmission failure due to collision, retransmission times for each node involved randomized based on backoff algorithm
 		elif next_transmit_timeslot.count(env.now) > 1:
-			#print "---A collision has occurred.---"
 			for i in range(len(next_transmit_timeslot)):
 				if (next_transmit_timeslot[i] == env.now):
+					if log: output.write("---Node %d attempting transmit---\n" % i)
 					num_times_retransmitted[i] += 1 
 					if backoff_algorithm == 'exponential':
 						k = min(num_times_retransmitted[i], 10)
@@ -57,27 +87,29 @@ def timeslots(env):
 					elif backoff_algorithm == 'linear':
 						k = min(num_times_retransmitted[i], 1024)
 						next_transmit_timeslot[i] = env.now + math.ceil(random.uniform(0, k))
-					#print "-----Node %d collided, rescheduled for time %d-----" % (i, next_transmit_timeslot[i])					
+					if log: output.write("-----Node %d collided, rescheduled for t = %d-----\n" % (i, next_transmit_timeslot[i]))					
 		
+		# All packets transmitted; print results
 		if packets_remaining == 0:
-			print "%d/%d(%2.5f) transmit timeslots successful." % (successful_transmits, env.now+1, float(successful_transmits)/(env.now+1))
+			print "%d/%d(%2.5f) transmit timeslots successful." % (packet_count*node_count, env.now+1, float(packet_count*node_count)/(env.now+1))
+			output.write("\n%d/%d(%2.5f) transmit timeslots successful." % (packet_count*node_count, env.now+1, float(packet_count*node_count)/(env.now+1)))
 			break			
-		yield env.timeout(timeslot_size)
+		yield env.timeout(1)
 	 
 env = simpy.Environment()
 
 env.process(timeslots(env))
 
-for node_num in range(10):
-	totalTime = 0
+for node_num in range(node_count):
+	total_time = 0
 	for i in range(packet_count):
 		interval = random.expovariate(lambd)
-		totalTime += interval
-		env.process(packet(env, totalTime, node_num))
+		total_time += interval
+		env.process(packet(env, total_time, node_num))
 
 env.run()
 
-""" RESULTS:
+""" RESULTS (nodes=10, packets=5000, seed=5):
 					Throughput
 					exponential			linear
 --------------------------------------------------

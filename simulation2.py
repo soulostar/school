@@ -39,9 +39,6 @@ next_transmit_timeslot = [-1] * node_count
 # The number of times each node has consecutively attempted to retransmit its current packet
 num_times_retransmitted = [0] * node_count
 
-# Total number of packets remaining across all nodes
-packets_remaining = packet_count * node_count
-
 # Default: fixed random seed for reproducibility of results
 random.seed(args.random)
 
@@ -58,7 +55,7 @@ def packet(env, arrive_time, node_number):
 	
 def timeslots(env):
 	""" Simulate the transmission of packets from nodes """
-	global packets_remaining
+	packets_transmitted = 0
 	while True:	
 		if log: output.write("Time slot %d:\n" % (env.now))
 
@@ -73,7 +70,7 @@ def timeslots(env):
 				if log: output.write("-----Node %d still has packet(s), next transmit attempt at time %d-----\n" % (transmitting_node, env.now + 1))
 				next_transmit_timeslot[transmitting_node] = env.now + 1
 			num_times_retransmitted[transmitting_node] = 0 
-			packets_remaining -= 1
+			packets_transmitted += 1
 
 		# Transmission failure due to collision, retransmission times for each node involved randomized based on backoff algorithm
 		elif next_transmit_timeslot.count(env.now) > 1:
@@ -90,9 +87,9 @@ def timeslots(env):
 					if log: output.write("-----Node %d collided, rescheduled for t = %d-----\n" % (i, next_transmit_timeslot[i]))					
 		
 		# All packets transmitted; print results
-		if packets_remaining == 0:
-			print "%d/%d(%2.5f) transmit timeslots successful." % (packet_count*node_count, env.now+1, float(packet_count*node_count)/(env.now+1))
-			output.write("\n%d/%d(%2.5f) transmit timeslots successful." % (packet_count*node_count, env.now+1, float(packet_count*node_count)/(env.now+1)))
+		if packets_transmitted == packet_count*node_count:
+			print "%d/%d(%2.5f) transmit timeslots successful." % (packets_transmitted, env.now+1, float(packets_transmitted)/(env.now+1))
+			if log: output.write("\n%d/%d(%2.5f) transmit timeslots successful." % (packets_transmitted, env.now+1, float(packets_transmitted)/(env.now+1)))
 			break			
 		yield env.timeout(1)
 	 
